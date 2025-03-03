@@ -3,7 +3,7 @@ import functools
 
 import numpy as np
 import cv2
-from pyzbar import pyzbar
+# from pyzbar import pyzbar
 
 from logging import getLogger
 from src.exceptions import QRCodeDecodeError
@@ -28,19 +28,19 @@ def measure_time(func):
     return wrapper
 
 
-@measure_time
-def process_qr_url(image_bytes: bytes) -> str:
-    arr = np.frombuffer(image_bytes, np.uint8)
-
-    image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-
-    decoded_objects = pyzbar.decode(image)
-
-    for obj in decoded_objects:
-        if obj.type == 'QRCODE':
-            return obj.data.decode("utf-8")
-
-    raise QRCodeDecodeError("QRCodeDecodeError")
+# @measure_time
+# def process_qr_url(image_bytes: bytes) -> str:
+#     arr = np.frombuffer(image_bytes, np.uint8)
+#
+#     image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+#
+#     decoded_objects = pyzbar.decode(image)
+# 
+#     for obj in decoded_objects:
+#         if obj.type == 'QRCODE':
+#             return obj.data.decode("utf-8")
+#
+#     raise QRCodeDecodeError("QRCodeDecodeError")
 
 
 @measure_time

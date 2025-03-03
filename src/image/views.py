@@ -11,7 +11,7 @@ from src.context import get_request_id
 from src.exceptions import QRCodeDecodeError
 
 from .schemas import UploadImageResponse, QrUrlResponse
-from .service import process_qr_url, process_qr_url_1
+from .service import process_qr_url_1
 
 
 log = getLogger(__name__)
