@@ -1,0 +1,8 @@
+fastapi[all]
+motor[srv]
+pydantic
+numpy
+opencv-python
+pyzbar
+qreader
+python-telegram-bot
