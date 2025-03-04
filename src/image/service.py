@@ -35,7 +35,7 @@ def measure_time(func):
 #     image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
 #
 #     decoded_objects = pyzbar.decode(image)
-# 
+#
 #     for obj in decoded_objects:
 #         if obj.type == 'QRCODE':
 #             return obj.data.decode("utf-8")

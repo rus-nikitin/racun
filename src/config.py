@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     web_concurrency: int = 1
 
     class Config:
-        env_file = "../.env"
+        env_file = "../api.env"
         env_file_encoding = "utf-8"
 
 
