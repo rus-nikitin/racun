@@ -7,6 +7,8 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
 from src.analytics.schemas import CompanyTotal, ItemTotal, GetAnalyticsResponse
+from src.bill.schemas import GetBillResponse
+from src.suf_purs.schemas import SpecificationItem
 from src.pipeline.schemas import ProcessingImageResponse
 from tg_bot.config import settings
 
@@ -42,7 +44,7 @@ class KeyboardLayouts:
 # Message formatters
 class MessageFormatter:
     @staticmethod
-    def format_top_items_section(title: str, items: List[CompanyTotal | ItemTotal], numbers=None):
+    def format_top_items_section(title: str, items: List[CompanyTotal | ItemTotal | SpecificationItem], numbers=None):
         if numbers is None:
             numbers = ["1️⃣", "2️⃣", "3️⃣"]
 
@@ -54,17 +56,21 @@ class MessageFormatter:
             ]
         ]
 
-
     @staticmethod
-    def format_bill_response(data: GetAnalyticsResponse, dt: datetime) -> str:
-        name_section = f"🏪 <b>{data.companies[0].name}</b>"
-        total_section = f"🧾 <b>Total</b> — {int(data.total)} <b>RSD</b>"
-        dt_section = f"⌚ <b>Time</b> — {dt.strftime('%d-%m-%Y %H:%M')}"
+    def format_bill_response(bill: GetBillResponse) -> str:
+        name_section = f"🏪 <b>{bill.seller_info.company}</b>"
+        total = 0.0
+        if len(bill.items) > 0:
+            total = sum([_.total for _ in bill.items])
+        total_section = f"🧾 <b>Total</b> — {int(total)} <b>RSD</b>"
+        dt_section = f"⌚ <b>Time</b> — {bill.dt.strftime('%d-%m-%Y %H:%M')}"
 
-        items = sorted(data.items, key=lambda x: x.total, reverse=True)
+        items = sorted(bill.items, key=lambda x: x.total, reverse=True)
         items_section = MessageFormatter.format_top_items_section(title="items", items=items)
 
-        return "\n".join([name_section, "", total_section, "", dt_section, "", *items_section])
+        qr_url = f'👉 <a href="{str(bill.qr_url)}">račun</a>'
+
+        return "\n".join([name_section, total_section, dt_section, qr_url, "", *items_section])
 
 
     @staticmethod
@@ -99,6 +105,15 @@ class APIClient:
             )
             response.raise_for_status()
             return ProcessingImageResponse.model_validate(response.json())
+
+
+    async def get_bill(self, bill_id: str) -> GetBillResponse:
+        params = {"bill_id": bill_id}
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(f"{self.base_url}/bill/one", params=params)
+            response.raise_for_status()
+            return GetBillResponse.model_validate(response.json())
 
 
     async def get_bill_details(self, bill_id: str) -> GetAnalyticsResponse:
@@ -144,9 +159,8 @@ class TelegramHandler:
 
             data = await self.api_client.process_image(file_bytes, username)
             bill_id = data.bill_id
-            dt = data.dt
-            data = await self.api_client.get_bill_details(bill_id)
-            msg = MessageFormatter.format_bill_response(data, dt)
+            bill = await self.api_client.get_bill(bill_id)
+            msg = MessageFormatter.format_bill_response(bill)
         except httpx.HTTPError as e:
             if hasattr(e, "response") and hasattr(e.response, "json"):
                 error_key = e.response.json().get('detail')
