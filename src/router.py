@@ -6,6 +6,7 @@ from src.suf_purs.views import router as suf_purs_router
 from src.bill.views import router as bill_router
 from src.pipeline.views import router as pipeline_router
 from src.analytics.views import router as analytics_router
+from src.cost.views import router as cost_router
 
 
 
@@ -17,3 +18,4 @@ api_router.include_router(suf_purs_router, prefix="/suf-purs", tags=["suf-purs"]
 api_router.include_router(bill_router, prefix="/bill", tags=["bill"])
 api_router.include_router(pipeline_router, prefix="/pipeline", tags=["pipeline"])
 api_router.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
+api_router.include_router(cost_router, prefix="/cost", tags=["cost"])

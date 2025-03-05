@@ -28,6 +28,12 @@ async def collections_init(db: AsyncIOMotorDatabase):
     except CollectionInvalid:
         log.info("Collection 'bill' already exists.")
 
+    try:
+        collection = await db.create_collection("cost")
+        log.info("Collection 'cost' successfully created.")
+    except CollectionInvalid:
+        log.info("Collection 'cost' already exists.")
+
 
 @asynccontextmanager
 async def db_lifespan(app: FastAPI):
