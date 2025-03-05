@@ -12,6 +12,8 @@ class UploadBillRequest(QrUrlRequest):
     items: List[SpecificationItem]
     seller_info: SellerInfo
 
+    category: str = "Other"
+
 
 class UploadBillResponse(RacunBase):
     upserted_id: str | None = None

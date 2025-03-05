@@ -3,11 +3,11 @@ from typing import List, Optional, Dict, Any
 from io import BytesIO
 
 import httpx
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 
 from src.analytics.schemas import CompanyTotal, ItemTotal, GetAnalyticsResponse
-from src.bill.schemas import GetBillResponse
+from src.bill.schemas import UploadBillRequest, UploadBillResponse, GetBillResponse
 from src.suf_purs.schemas import SpecificationItem
 from src.pipeline.schemas import ProcessingImageResponse
 from tg_bot.config import settings
@@ -64,13 +64,14 @@ class MessageFormatter:
             total = sum([_.total for _ in bill.items])
         total_section = f"🧾 <b>Total</b> — {int(total)} <b>RSD</b>"
         dt_section = f"⌚ <b>Time</b> — {bill.dt.strftime('%d-%m-%Y %H:%M')}"
+        category_section = f"📌 <b>Category</b> — {bill.category}"
 
         items = sorted(bill.items, key=lambda x: x.total, reverse=True)
         items_section = MessageFormatter.format_top_items_section(title="items", items=items)
 
         qr_url = f'👉 <a href="{str(bill.qr_url)}">račun</a>'
 
-        return "\n".join([name_section, total_section, dt_section, qr_url, "", *items_section])
+        return "\n".join([name_section, total_section, dt_section, category_section, qr_url, "", *items_section])
 
 
     @staticmethod
@@ -114,6 +115,15 @@ class APIClient:
             response = await client.get(f"{self.base_url}/bill/one", params=params)
             response.raise_for_status()
             return GetBillResponse.model_validate(response.json())
+
+
+    async def upload_bill(self, bill_upload: UploadBillRequest, user_name: str) -> UploadBillResponse:
+        params = {"user_name": user_name}
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(f"{self.base_url}/bill/upload", params=params, json=bill_upload.model_dump(mode="json"))
+            response.raise_for_status()
+            return UploadBillResponse.model_validate(response.json())
 
 
     async def get_bill_details(self, bill_id: str) -> GetAnalyticsResponse:
@@ -161,16 +171,22 @@ class TelegramHandler:
             bill_id = data.bill_id
             bill = await self.api_client.get_bill(bill_id)
             msg = MessageFormatter.format_bill_response(bill)
+
+            keyboard = [[InlineKeyboardButton("Change category", callback_data=f"changeCategory__{bill_id}")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(msg, parse_mode="HTML", reply_markup=reply_markup)
         except httpx.HTTPError as e:
             if hasattr(e, "response") and hasattr(e.response, "json"):
                 error_key = e.response.json().get('detail')
                 msg = ErrorMessages.get_error_message(error_key)
             else:
                 msg = f"An error occurred: {str(e)}"
+            await update.message.reply_text(msg, parse_mode="HTML")
         except Exception as e:
             msg = f"An error occurred: {str(e)}"
-        finally:
             await update.message.reply_text(msg, parse_mode="HTML")
+        # finally:
+        #     await update.message.reply_text(msg, parse_mode="HTML")
 
 
     async def handle_message(self, update: Update, context: CallbackContext) -> None:
@@ -197,6 +213,37 @@ class TelegramHandler:
             await update.message.reply_text(f"An error occurred: {str(e)}")
 
 
+    async def handle_button(self, update: Update, context: CallbackContext) -> None:
+        query = update.callback_query
+        await query.answer()
+        action, sub_action, bill_id = query.data.split("_")
+        if action == "changeCategory":
+            keyboard = [
+                [InlineKeyboardButton("🛒 Grocery", callback_data=f"setCategory_Grocery_{bill_id}")],
+                [InlineKeyboardButton("🍽️ Food & Drinks", callback_data=f"setCategory_Food & Drinks_{bill_id}")],
+                [InlineKeyboardButton("👗 Fashion & Clothing", callback_data=f"setCategory_Fashion & Clothing_{bill_id}")],
+                [InlineKeyboardButton("🏠 Home & Decor", callback_data=f"setCategory_Home & Decor_{bill_id}")],
+                [InlineKeyboardButton("🚗 Automobiles", callback_data=f"setCategory_Automobiles_{bill_id}")],
+                [InlineKeyboardButton("🌍 Travel & Tourism", callback_data=f"setCategory_Travel & Tourism_{bill_id}")],
+                [InlineKeyboardButton("🚀 Other", callback_data=f"setCategory_Other_{bill_id}")],
+                [InlineKeyboardButton("🚫 Cancel", callback_data=f"cancelCategory__{bill_id}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.edit_text(f"Choose category", reply_markup=reply_markup)
+        elif action == "setCategory":
+            bill = await self.api_client.get_bill(bill_id)
+
+            upload_bill_request = bill.model_dump()
+            upload_bill_request["category"] = sub_action
+            upload_bill_request = UploadBillRequest(**upload_bill_request)
+            upserted_bill = await self.api_client.upload_bill(upload_bill_request, bill.user_name)
+            bill = await self.api_client.get_bill(bill_id)
+            msg = MessageFormatter.format_bill_response(bill)
+            await query.message.edit_text(msg, parse_mode="HTML")
+        elif action == "cancelCategory":
+            await query.message.edit_text("Category change canceled")
+
+
 def main():
     handler = TelegramHandler()
     app = Application.builder().token(Config.TOKEN).build()
@@ -205,6 +252,7 @@ def main():
     app.add_handler(CommandHandler("start", handler.start))
     app.add_handler(MessageHandler(filters.PHOTO, handler.handle_image))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handler.handle_message))
+    app.add_handler(CallbackQueryHandler(handler.handle_button))
 
     app.run_polling()
 
