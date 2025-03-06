@@ -10,7 +10,9 @@ from src.analytics.schemas import CompanyTotal, ItemTotal, GetAnalyticsResponse
 from src.bill.schemas import UploadBillRequest, UploadBillResponse, GetBillResponse
 from src.suf_purs.schemas import SpecificationItem
 from src.pipeline.schemas import ProcessingImageResponse
+from src.cost.schemas import CostItem, CostSellerInfo, CostCreate, CostUpdate, CostDocument
 from tg_bot.config import settings
+from tg_bot.service import parse_line
 
 
 class Config:
@@ -32,12 +34,12 @@ class ErrorMessages:
     def get_error_message(cls, error_key: str) -> str:
         return cls.ERROR_MAP.get(error_key, cls.ERROR_MAP["default"])
 
-
+# 📅 📆 📊 💰
 # Keyboard layouts
 class KeyboardLayouts:
     MAIN_MENU = ReplyKeyboardMarkup([
-        ["📅 Day", "📆 Month"],
-        ["📊 Year", "💰 Total"]
+        ["Day", "Month"],
+        ["Year", "Total"]
     ], resize_keyboard=True)
 
 
@@ -72,6 +74,18 @@ class MessageFormatter:
         qr_url = f'👉 <a href="{str(bill.qr_url)}">račun</a>'
 
         return "\n".join([name_section, total_section, dt_section, category_section, qr_url, "", *items_section])
+
+    @staticmethod
+    def format_cost_response(cost: CostDocument) -> str:
+        company_section = f"🏪 <b>{cost.seller_info.company}</b>"
+        total = 0.0
+        if len(cost.items) > 0:
+            total = sum([_.total for _ in cost.items])
+        total_section = f"🧾 <b>Total</b> — {int(total)} <b>RSD</b>"
+        dt_section = f"⌚ <b>Time</b> — {cost.dt.strftime('%d-%m-%Y')}"
+        category_section = f"📌 <b>Category</b> — {cost.category}"
+
+        return "\n".join([company_section, total_section, dt_section, category_section])
 
 
     @staticmethod
@@ -135,6 +149,15 @@ class APIClient:
             return GetAnalyticsResponse.model_validate(response.json())
 
 
+    async def upload_cost(self, cost_upload: CostCreate | CostUpdate, user_name: str) -> CostDocument:
+        params = {"user_name": user_name}
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(f"{self.base_url}/cost/upload", params=params, json=cost_upload.model_dump(mode="json"))
+            response.raise_for_status()
+            return CostDocument.model_validate(response.json())
+
+
     async def get_analytics(self, username: str, from_dt: Optional[str] = None) -> GetAnalyticsResponse:
         params = {"user_name": username}
         if from_dt is not None:
@@ -185,11 +208,9 @@ class TelegramHandler:
         except Exception as e:
             msg = f"An error occurred: {str(e)}"
             await update.message.reply_text(msg, parse_mode="HTML")
-        # finally:
-        #     await update.message.reply_text(msg, parse_mode="HTML")
 
 
-    async def handle_message(self, update: Update, context: CallbackContext) -> None:
+    async def handle_period_text(self, update: Update, context: CallbackContext) -> None:
         text = update.message.text.lower()
         datetime_now = datetime.now()
 
@@ -211,6 +232,41 @@ class TelegramHandler:
             await update.message.reply_text(msg, parse_mode="HTML")
         except Exception as e:
             await update.message.reply_text(f"An error occurred: {str(e)}")
+
+
+    async def handle_message(self, update: Update, context: CallbackContext) -> None:
+        text = update.message.text.lower()
+        if text in {"day", "month", "year", "total"}:
+            await self.handle_period_text(update, context)
+            return
+
+
+        username = update.message.from_user.username or "unknown"
+        total, company, date = parse_line(text)
+        if type(total) is not float:
+            await update.message.reply_text("Unknown command")
+            return
+        if company is None:
+            await update.message.reply_text("Please enter the company name")
+            return
+        if date is not None:
+            try:
+                dt = datetime.strptime(date, '%Y-%m-%d')
+            except ValueError:
+                await update.message.reply_text("The date is in an incorrect format")
+                return
+        else:
+            dt = datetime.now()
+        cost = CostCreate(dt=dt, items=[CostItem(name="", total=total)], seller_info=CostSellerInfo(company=company))
+        document = await self.api_client.upload_cost(cost, username)
+        msg = MessageFormatter.format_cost_response(document)
+        cost_id = document.cost_id
+        keyboard = [
+            [InlineKeyboardButton("Change category", callback_data=f"changeCategory_forCost_{cost_id}")],
+            [InlineKeyboardButton("Remove record", callback_data=f"removeRecord_forCost_{cost_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(msg, parse_mode="HTML", reply_markup=reply_markup)
 
 
     async def handle_button(self, update: Update, context: CallbackContext) -> None:
