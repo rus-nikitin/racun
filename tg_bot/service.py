@@ -23,13 +23,13 @@ def parse_line(line: str):
     total = custom_str_to_float(parts[0])
     date = None
 
-    if len(parts) >= 3 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[-1]):
+    if len(parts) >= 3 and re.fullmatch(r"\d{2}-\d{2}-\d{4}", parts[-1]):
         date = parts[-1]
         company = " ".join(parts[1:-1])  # Всё между total и date — это company
     else:
         company = " ".join(parts[1:])  # Всё после total — это company
 
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", company) and date is None:
+    if re.fullmatch(r"\d{2}-\d{2}-\d{4}", company) and date is None:
         company, date = date, company
 
     if company == "":
@@ -48,8 +48,8 @@ if __name__ == "__main__":
 
     assert parse_line("20") == (20.0, None, None)
     assert parse_line("20 yettel") == (20.0, 'yettel', None)
-    assert parse_line("20 yettel 2025-03-01") == (20.0, 'yettel', '2025-03-01')
+    assert parse_line("20 yettel 01-03-2025") == (20.0, 'yettel', '01-03-2025')
     assert parse_line("20 crna ovca") == (20.0, 'crna ovca', None)
-    assert parse_line("20 crna ovca 2025-03-01") == (20.0, 'crna ovca', '2025-03-01')
-    assert parse_line("200 beer 2024-12-26") == (200.0, 'beer', '2024-12-26')
-    assert parse_line("200 2024-12-26") == (200.0, None, '2024-12-26')
+    assert parse_line("20 crna ovca 01-03-2025") == (20.0, 'crna ovca', '01-03-2025')
+    assert parse_line("200 beer 26-12-2024") == (200.0, 'beer', '26-12-2024')
+    assert parse_line("200 26-12-2024") == (200.0, None, '26-12-2024')

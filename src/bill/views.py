@@ -84,6 +84,26 @@ async def get_bill(
     return None
 
 
+@router.delete("/one")
+async def delete_bill(
+    bill_id: str,
+    user_name: str = "unknown",
+    db: AsyncIOMotorDatabase=Depends(get_db),
+    request_id: str = Depends(get_request_id)
+):
+    query = {"_id": ObjectId(bill_id)}
+    collection = db["bill"]
+
+    result = await collection.delete_one(query)
+
+    log.info(
+        f"Request ID: [{request_id}] "
+        f"bill {bill_id} removed by {user_name}"
+    )
+
+    return result.deleted_count
+
+
 @router.get("", response_model=List[GetBillResponse])
 async def get_bills(
     user_name: str = "unknown",

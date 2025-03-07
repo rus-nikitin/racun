@@ -74,6 +74,26 @@ async def get_cost(
         return CostDocument(cost_id=cost_id, **document)
     return None
 
+@router.delete("/one")
+async def delete_cost(
+    cost_id: str,
+    user_name: str = "unknown",
+    db: AsyncIOMotorDatabase=Depends(get_db),
+    request_id: str = Depends(get_request_id)
+):
+    query = {"_id": ObjectId(cost_id)}
+    collection = db["cost"]
+
+    result = await collection.delete_one(query)
+
+    log.info(
+        f"Request ID: [{request_id}] "
+        f"cost {cost_id} removed by {user_name}"
+    )
+
+    return result.deleted_count
+
+
 @router.get("", response_model=List[CostDocument])
 async def get_costs(
     user_name: str = "unknown",

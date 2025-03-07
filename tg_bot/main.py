@@ -34,13 +34,38 @@ class ErrorMessages:
     def get_error_message(cls, error_key: str) -> str:
         return cls.ERROR_MAP.get(error_key, cls.ERROR_MAP["default"])
 
-# 📅 📆 📊 💰
-# Keyboard layouts
+
 class KeyboardLayouts:
     MAIN_MENU = ReplyKeyboardMarkup([
         ["Day", "Month"],
         ["Year", "Total"]
     ], resize_keyboard=True)
+
+    categories = [
+        "🛒 Grocery",
+        "🍽️ Food & Drinks",
+        "👗 Fashion & Clothing",
+        "🏠 Home & Decor",
+        "🚗 Automobiles",
+        "🌍 Travel & Tourism",
+        "🚀 Other",
+        "🚫 Cancel"
+    ]
+
+    @staticmethod
+    def get_category_keyboard(handle: str, for_item: str) -> List:
+        """
+        handle | category | for_item
+        setCategory_Grocery_forCost_67c99e7414606964687e7c26
+        setCategory_Grocery_forBill_67c956c76f72582f61c62ef0
+        """
+        keyboard = []
+        for category in KeyboardLayouts.categories:
+            parts =  category.split()
+            category_str = " ".join(parts[1:])  # w/o emoji
+            keyboard.append([InlineKeyboardButton(category, callback_data=f"{handle}_{category_str}_{for_item}")])
+
+        return keyboard
 
 
 # Message formatters
@@ -82,7 +107,7 @@ class MessageFormatter:
         if len(cost.items) > 0:
             total = sum([_.total for _ in cost.items])
         total_section = f"🧾 <b>Total</b> — {int(total)} <b>RSD</b>"
-        dt_section = f"⌚ <b>Time</b> — {cost.dt.strftime('%d-%m-%Y')}"
+        dt_section = f"⌚ <b>Date</b> — {cost.dt.strftime('%d-%m-%Y')}"
         category_section = f"📌 <b>Category</b> — {cost.category}"
 
         return "\n".join([company_section, total_section, dt_section, category_section])
@@ -131,6 +156,14 @@ class APIClient:
             return GetBillResponse.model_validate(response.json())
 
 
+    async def delete_bill(self, bill_id: str, user_name: str) -> int:
+        params = {"bill_id": bill_id, "user_name": user_name}
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.delete(f"{self.base_url}/bill/one", params=params)
+            response.raise_for_status()
+            return response.json()
+
     async def upload_bill(self, bill_upload: UploadBillRequest, user_name: str) -> UploadBillResponse:
         params = {"user_name": user_name}
 
@@ -148,6 +181,21 @@ class APIClient:
             response.raise_for_status()
             return GetAnalyticsResponse.model_validate(response.json())
 
+    async def get_cost(self, cost_id: str) -> CostDocument:
+        params = {"cost_id": cost_id}
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(f"{self.base_url}/cost/one", params=params)
+            response.raise_for_status()
+            return CostDocument.model_validate(response.json())
+
+    async def delete_cost(self, cost_id: str, user_name: str) -> int:
+        params = {"cost_id": cost_id, "user_name": user_name}
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.delete(f"{self.base_url}/cost/one", params=params)
+            response.raise_for_status()
+            return response.json()
 
     async def upload_cost(self, cost_upload: CostCreate | CostUpdate, user_name: str) -> CostDocument:
         params = {"user_name": user_name}
@@ -195,7 +243,11 @@ class TelegramHandler:
             bill = await self.api_client.get_bill(bill_id)
             msg = MessageFormatter.format_bill_response(bill)
 
-            keyboard = [[InlineKeyboardButton("Change category", callback_data=f"changeCategory__{bill_id}")]]
+            keyboard = [
+                [InlineKeyboardButton("Change category", callback_data=f"changeCategory_forBill_{bill_id}")],
+                [InlineKeyboardButton("Remove record", callback_data=f"removeRecord_forBill_{bill_id}")]
+            ]
+
             reply_markup = InlineKeyboardMarkup(keyboard)
             await update.message.reply_text(msg, parse_mode="HTML", reply_markup=reply_markup)
         except httpx.HTTPError as e:
@@ -247,11 +299,10 @@ class TelegramHandler:
             await update.message.reply_text("Unknown command")
             return
         if company is None:
-            await update.message.reply_text("Please enter the company name")
-            return
+            company = ""
         if date is not None:
             try:
-                dt = datetime.strptime(date, '%Y-%m-%d')
+                dt = datetime.strptime(date, '%d-%m-%Y')
             except ValueError:
                 await update.message.reply_text("The date is in an incorrect format")
                 return
@@ -268,36 +319,106 @@ class TelegramHandler:
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(msg, parse_mode="HTML", reply_markup=reply_markup)
 
+    async def handle_changeCategory(self, update: Update, context: CallbackContext):
+        query = update.callback_query
+        _, for_item = query.data.split("_", 1)
 
-    async def handle_button(self, update: Update, context: CallbackContext) -> None:
+        keyboard = KeyboardLayouts.get_category_keyboard(handle="setCategory", for_item=for_item)
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        return await query.message.edit_text(f"Choose category", reply_markup=reply_markup)
+
+    @staticmethod
+    async def edit_cost_details(update: Update, context: CallbackContext, cost_document):
+        query = update.callback_query
+
+        formatted_message = MessageFormatter.format_cost_response(cost_document)
+        cost_id = cost_document.cost_id
+        keyboard = [
+            [InlineKeyboardButton("Change category", callback_data=f"changeCategory_forCost_{cost_id}")],
+            [InlineKeyboardButton("Remove record", callback_data=f"removeRecord_forCost_{cost_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        return await query.message.edit_text(formatted_message, parse_mode="HTML", reply_markup=reply_markup)
+
+    @staticmethod
+    async def edit_bill_details(update: Update, context: CallbackContext, bill_document, bill_id):
+        query = update.callback_query
+
+        formatted_message = MessageFormatter.format_bill_response(bill_document)
+        keyboard = [
+            [InlineKeyboardButton("Change category", callback_data=f"changeCategory_forBill_{bill_id}")],
+            [InlineKeyboardButton("Remove record", callback_data=f"removeRecord_forBill_{bill_id}")]
+        ]
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        return await query.message.edit_text(formatted_message, parse_mode="HTML", reply_markup=reply_markup)
+
+    async def handle_setCategory_forCost(self, update: Update, context: CallbackContext):
+        query = update.callback_query
+        handle, category, item_type, item_id = query.data.split("_")
+
+        document = await self.api_client.get_cost(item_id)
+        if category == "Cancel":
+            return await TelegramHandler.edit_cost_details(update, context, document)
+
+        cost_data = document.model_dump()
+        cost_data["category"] = category
+        cost = CostUpdate(**cost_data)
+
+        updated_cost_document = await self.api_client.upload_cost(cost, document.user_name)
+        return await TelegramHandler.edit_cost_details(update, context, updated_cost_document)
+
+    async def handle_setCategory_forBill(self, update: Update, context: CallbackContext):
+        query = update.callback_query
+        handle, category, item_type, item_id = query.data.split("_")
+
+        document = await self.api_client.get_bill(item_id)
+        if category == "Cancel":
+            return await TelegramHandler.edit_bill_details(update, context, document, item_id)
+
+        bill_data = document.model_dump()
+        bill_data["category"] = category
+        bill = UploadBillRequest(**bill_data)
+        await self.api_client.upload_bill(bill, document.user_name)
+        document = await self.api_client.get_bill(item_id)
+
+        return await TelegramHandler.edit_bill_details(update, context, document, item_id)
+
+    async def handle_setCategory(self, update: Update, context: CallbackContext):
+        action_handlers = {
+            "forCost": self.handle_setCategory_forCost,
+            "forBill": self.handle_setCategory_forBill,
+        }
+
+        query = update.callback_query
+        handle, category, item_type, item_id = query.data.split("_")
+        handler_function = action_handlers.get(item_type)
+        return await handler_function(update, context)
+
+    async def handle_removeRecord(self, update: Update, context: CallbackContext):
+        query = update.callback_query
+        handle, item_type, item_id = query.data.split("_")
+
+        text_html = query.message.text_html
+        if item_type == "forBill":
+            deleted_count = await self.api_client.delete_bill(item_id, query.from_user.username)
+        elif item_type == "forCost":
+            deleted_count = await self.api_client.delete_cost(item_id, query.from_user.username)
+
+        return await query.message.edit_text("Removed\n"+text_html, parse_mode="HTML")
+
+    async def handle_button(self, update: Update, context: CallbackContext):
+        action_handlers = {
+            "changeCategory": self.handle_changeCategory,
+            "setCategory": self.handle_setCategory,
+            "removeRecord": self.handle_removeRecord
+        }
+
         query = update.callback_query
         await query.answer()
-        action, sub_action, bill_id = query.data.split("_")
-        if action == "changeCategory":
-            keyboard = [
-                [InlineKeyboardButton("🛒 Grocery", callback_data=f"setCategory_Grocery_{bill_id}")],
-                [InlineKeyboardButton("🍽️ Food & Drinks", callback_data=f"setCategory_Food & Drinks_{bill_id}")],
-                [InlineKeyboardButton("👗 Fashion & Clothing", callback_data=f"setCategory_Fashion & Clothing_{bill_id}")],
-                [InlineKeyboardButton("🏠 Home & Decor", callback_data=f"setCategory_Home & Decor_{bill_id}")],
-                [InlineKeyboardButton("🚗 Automobiles", callback_data=f"setCategory_Automobiles_{bill_id}")],
-                [InlineKeyboardButton("🌍 Travel & Tourism", callback_data=f"setCategory_Travel & Tourism_{bill_id}")],
-                [InlineKeyboardButton("🚀 Other", callback_data=f"setCategory_Other_{bill_id}")],
-                [InlineKeyboardButton("🚫 Cancel", callback_data=f"cancelCategory__{bill_id}")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.message.edit_text(f"Choose category", reply_markup=reply_markup)
-        elif action == "setCategory":
-            bill = await self.api_client.get_bill(bill_id)
-
-            upload_bill_request = bill.model_dump()
-            upload_bill_request["category"] = sub_action
-            upload_bill_request = UploadBillRequest(**upload_bill_request)
-            upserted_bill = await self.api_client.upload_bill(upload_bill_request, bill.user_name)
-            bill = await self.api_client.get_bill(bill_id)
-            msg = MessageFormatter.format_bill_response(bill)
-            await query.message.edit_text(msg, parse_mode="HTML")
-        elif action == "cancelCategory":
-            await query.message.edit_text("Category change canceled")
+        handler, _ = query.data.split("_", 1)
+        handler_function = action_handlers.get(handler)
+        return await handler_function(update, context)
 
 
 def main():
