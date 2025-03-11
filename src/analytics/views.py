@@ -12,6 +12,8 @@ from src.context import get_request_id
 from src.bill.views import get_bills, get_bill
 from src.bill.schemas import GetBillResponse, SpecificationItem
 
+from src.cost.views import get_costs
+
 from .schemas import (
     CompanyTotal,
     ItemTotal,
@@ -60,7 +62,9 @@ async def get_bills_analytics(
     if bill_id is not None:
         bill = await get_bill(bill_id, db=db, request_id=request_id)
         bills = [bill]
+        costs = []
     else:
         bills = await get_bills(user_name, from_dt, db=db, request_id=request_id)
+        costs = await get_costs(user_name, from_dt, db=db, request_id=request_id)
 
-    return process_bills(bills)
+    return process_bills(bills+costs)
