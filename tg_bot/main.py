@@ -129,42 +129,47 @@ class MessageFormatter:
 
     @staticmethod
     def format_analytics_by_categories(data: ByCategoriesResponse, period: str, from_dt: str | None) -> str:
-        total_s = f"<b>{int(data.total):,} RSD</b>"
+        total_s = f"{int(data.total):,}".replace(",", ".")
+        total_s = f"<b>{total_s} RSD</b>"
         period_map = {
-            "today": f"Costs {total_s} for today ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%-d %B %a') if from_dt else ''})",
-            "currentMonth": f"Costs {total_s} in the current month ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%B')  if from_dt else ''})",
-            "currentYear": f"Costs {total_s} in the current year ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%Y')  if from_dt else ''})",
-            "allTime": f"Costs {total_s} for all time"
+            "today": f"{total_s} spent today ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%-d %B %a') if from_dt else ''})",
+            "currentMonth": f"{total_s} spent this month ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%B')  if from_dt else ''})",
+            "currentYear": f"{total_s} spent this year ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%Y')  if from_dt else ''})",
+            "allTime": f"{total_s} spent overall"
         }
         header_section = period_map[period]
         categories_section = []
         for category in data.categories:
-            s = f"<b>{int(category.total):,} ({int(1e2*category.total/data.total)}%)</b> — {KeyboardLayouts.categories_map.get(category.category, '')}"
+            total_s = f"{int(category.total):,}".replace(",", ".")
+            s = f"<b>{total_s} ({int(1e2*category.total/data.total)}%)</b> — {KeyboardLayouts.categories_map.get(category.category, '')}"
             categories_section.append(s)
 
         return "\n".join([header_section, "", *categories_section])
 
     @staticmethod
     def format_analytics_by_bills(data: GetAnalyticsResponse, period: str, from_dt: str | None) -> str:
-        total_s = f"<b>{int(data.total):,} RSD</b>"
+        total_s = f"{int(data.total):,}".replace(",", ".")
+        total_s = f"<b>{total_s} RSD</b>"
         period_map = {
-            "today": f"Costs {total_s} for today ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%-d %B %a') if from_dt else ''})",
-            "currentMonth": f"Costs {total_s} in the current month ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%B')  if from_dt else ''})",
-            "currentYear": f"Costs {total_s} in the current year ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%Y')  if from_dt else ''})",
-            "allTime": f"Costs {total_s} for all time"
+            "today": f"{total_s} spent today ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%-d %B %a') if from_dt else ''})",
+            "currentMonth": f"{total_s} spent this month ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%B')  if from_dt else ''})",
+            "currentYear": f"{total_s} spent this year ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%Y')  if from_dt else ''})",
+            "allTime": f"{total_s} spent overall"
         }
         header_section = period_map[period]
 
         companies = sorted(data.companies, key=lambda x: x.total, reverse=True)
         companies_section = [f"🔥 <b>Top companies out of {len(companies)}</b>"]
         for company in companies[:5]:
-            s = f"<b>{int(company.total):,} ({int(1e2*company.total/data.total)}%)</b> — {company.name}"
+            total_s = f"{int(company.total):,}".replace(",", ".")
+            s = f"<b>{total_s} ({int(1e2*company.total/data.total)}%)</b> — {company.name}"
             companies_section.append(s)
 
         items = sorted(data.items, key=lambda x: x.total, reverse=True)
         items_section = [f"🔥 <b>Top items out of {len(items)}</b>"]
         for item in items[:5]:
-            s = f"<b>{int(item.total):,} ({int(1e2 * item.total / data.total)}%)</b> — {item.name}"
+            total_s = f"{int(item.total):,}".replace(",", ".")
+            s = f"<b>{total_s} ({int(1e2 * item.total / data.total)}%)</b> — {item.name}"
             items_section.append(s)
 
         return "\n".join([header_section, "", *companies_section, "", *items_section])
