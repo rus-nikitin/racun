@@ -101,7 +101,8 @@ class MessageFormatter:
         items_section = [f"🔥 <b>Top items out of {len(items)}</b>"]
         for item in items[:5]:
             total_s = f"{int(item.total):,}".replace(",", ".")
-            s = f"<b>{total_s} ({int(1e2 * item.total / total)}%)</b> — {item.name}"
+            rate = int(round(1e2*item.total/total))
+            s = f"<b>{total_s} ({rate}%)</b> — {item.name}"
             items_section.append(s)
 
         return "\n".join([header_section, category_section, qr_url, "", *items_section])
@@ -133,7 +134,8 @@ class MessageFormatter:
         categories_section = []
         for category in data.categories:
             total_s = f"{int(category.total):,}".replace(",", ".")
-            s = f"<b>{total_s} ({int(1e2*category.total/data.total)}%)</b> — {KeyboardLayouts.categories_map.get(category.category, '')}"
+            rate = int(round(1e2*category.total/data.total))
+            s = f"<b>{total_s} ({rate}%)</b> — {KeyboardLayouts.categories_map.get(category.category, '')}"
             categories_section.append(s)
 
         return "\n".join([header_section, "", *categories_section])
@@ -154,14 +156,16 @@ class MessageFormatter:
         companies_section = [f"🔥 <b>Top companies out of {len(companies)}</b>"]
         for company in companies[:5]:
             total_s = f"{int(company.total):,}".replace(",", ".")
-            s = f"<b>{total_s} ({int(1e2*company.total/data.total)}%)</b> — {company.name}"
+            rate = int(round(1e2*company.total/data.total))
+            s = f"<b>{total_s} ({rate}%)</b> — {company.name}"
             companies_section.append(s)
 
         items = sorted(data.items, key=lambda x: x.total, reverse=True)
         items_section = [f"🔥 <b>Top items out of {len(items)}</b>"]
         for item in items[:5]:
             total_s = f"{int(item.total):,}".replace(",", ".")
-            s = f"<b>{total_s} ({int(1e2 * item.total / data.total)}%)</b> — {item.name}"
+            rate = int(round(1e2*item.total/data.total))
+            s = f"<b>{total_s} ({rate}%)</b> — {item.name}"
             items_section.append(s)
 
         return "\n".join([header_section, "", *companies_section, "", *items_section])
