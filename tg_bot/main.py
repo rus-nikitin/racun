@@ -87,45 +87,37 @@ class MessageFormatter:
 
     @staticmethod
     def format_bill_response(bill: GetBillResponse) -> str:
-        name_section = f"🏪 <b>{bill.seller_info.company}</b>"
         total = 0.0
         if len(bill.items) > 0:
             total = sum([_.total for _ in bill.items])
-        total_section = f"🧾 <b>Total</b> — {int(total)} <b>RSD</b>"
-        dt_section = f"⌚ <b>Time</b> — {bill.dt.strftime('%d-%m-%Y %H:%M')}"
-        category_section = f"📌 <b>Category</b> — {bill.category}"
+        total_s = f"{int(total):,}".replace(",", ".")
+        total_s = f"<b>{total_s} RSD</b>"
 
-        items = sorted(bill.items, key=lambda x: x.total, reverse=True)
-        items_section = MessageFormatter.format_top_items_section(title="items", items=items)
-
+        header_section = f"{total_s} spent on <b>{bill.seller_info.company}</b> ({bill.dt.strftime('%-d %B %a %H:%M')})"
+        category_section = KeyboardLayouts.categories_map.get(bill.category, '')
         qr_url = f'👉 <a href="{str(bill.qr_url)}">račun</a>'
 
-        return "\n".join([name_section, total_section, dt_section, category_section, qr_url, "", *items_section])
+        items = sorted(bill.items, key=lambda x: x.total, reverse=True)
+        items_section = [f"🔥 <b>Top items out of {len(items)}</b>"]
+        for item in items[:5]:
+            total_s = f"{int(item.total):,}".replace(",", ".")
+            s = f"<b>{total_s} ({int(1e2 * item.total / total)}%)</b> — {item.name}"
+            items_section.append(s)
+
+        return "\n".join([header_section, category_section, qr_url, "", *items_section])
 
     @staticmethod
     def format_cost_response(cost: CostDocument) -> str:
-        company_section = f"🏪 <b>{cost.seller_info.company}</b>"
         total = 0.0
         if len(cost.items) > 0:
             total = sum([_.total for _ in cost.items])
-        total_section = f"🧾 <b>Total</b> — {int(total)} <b>RSD</b>"
-        dt_section = f"⌚ <b>Date</b> — {cost.dt.strftime('%d-%m-%Y')}"
-        category_section = f"📌 <b>Category</b> — {cost.category}"
+        total_s = f"{int(total):,}".replace(",", ".")
+        total_s = f"<b>{total_s} RSD</b>"
 
-        return "\n".join([company_section, total_section, dt_section, category_section])
+        header_section = f"{total_s} spent on <b>{cost.seller_info.company}</b> ({cost.dt.strftime('%-d %B %a')})"
+        category_section = KeyboardLayouts.categories_map.get(cost.category, '')
 
-
-    @staticmethod
-    def format_analytics_response(data: GetAnalyticsResponse) -> str:
-        total_section = f"🧾 <b>Total</b> — {int(data.total)} <b>RSD</b>"
-
-        companies = sorted(data.companies, key=lambda x: x.total, reverse=True)
-        companies_section = MessageFormatter.format_top_items_section(title="companies", items=companies)
-
-        items = sorted(data.items, key=lambda x: x.total, reverse=True)
-        items_section = MessageFormatter.format_top_items_section(title="items", items=items)
-
-        return "\n".join([total_section, "", *companies_section, "", *items_section])
+        return "\n".join([header_section, category_section])
 
     @staticmethod
     def format_analytics_by_categories(data: ByCategoriesResponse, period: str, from_dt: str | None) -> str:
@@ -320,30 +312,6 @@ class TelegramHandler:
             msg = f"An error occurred: {str(e)}"
             await update.message.reply_text(msg, parse_mode="HTML")
 
-
-    async def handle_period_text(self, update: Update, context: CallbackContext) -> None:
-        text = update.message.text.lower()
-        datetime_now = datetime.now()
-
-        from_dt = None
-        if "day" in text:
-            from_dt = datetime_now.strftime('%Y-%m-%d')
-        elif "month" in text:
-            from_dt = datetime(year=datetime_now.year, month=datetime_now.month, day=1).strftime('%Y-%m-%d')
-        elif "year" in text:
-            from_dt = datetime(year=datetime_now.year, month=1, day=1).strftime('%Y-%m-%d')
-        elif "total" not in text:
-            await update.message.reply_text("Unknown command. Please use the keyboard buttons.")
-            return
-
-        try:
-            username = update.message.from_user.username or "unknown"
-            data = await self.api_client.get_analytics(username, from_dt)
-            msg = MessageFormatter.format_analytics_response(data)
-            await update.message.reply_text(msg, parse_mode="HTML")
-        except Exception as e:
-            await update.message.reply_text(f"An error occurred: {str(e)}")
-
     async def handle_message_statistics(self, update: Update, context: CallbackContext) -> None:
         keyboard = [
             [InlineKeyboardButton("By Categories", callback_data=f"statistics_byCategories")],
@@ -423,10 +391,9 @@ class TelegramHandler:
             handle = "_".join(_)
             keyboard = [
                 [InlineKeyboardButton("Today", callback_data=f"{handle}_today")],
-                [InlineKeyboardButton("Current Month", callback_data=f"{handle}_currentMonth")],
-                # [InlineKeyboardButton("Previous Month", callback_data=f"{handle}_previousMonth")],
-                [InlineKeyboardButton("Current Year", callback_data=f"{handle}_currentYear")],
-                [InlineKeyboardButton("All time", callback_data=f"{handle}_allTime")],
+                [InlineKeyboardButton("This Month", callback_data=f"{handle}_currentMonth")],
+                [InlineKeyboardButton("This Year", callback_data=f"{handle}_currentYear")],
+                [InlineKeyboardButton("Overall", callback_data=f"{handle}_allTime")],
                 [InlineKeyboardButton("Cancel", callback_data=f"{handle}_cancel")],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
