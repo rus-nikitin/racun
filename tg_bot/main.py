@@ -6,7 +6,7 @@ import httpx
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 
-from src.analytics.schemas import CompanyTotal, ItemTotal, GetAnalyticsResponse
+from src.analytics.schemas import CompanyTotal, ItemTotal, GetAnalyticsResponse, ByCategoriesResponse
 from src.bill.schemas import UploadBillRequest, UploadBillResponse, GetBillResponse
 from src.suf_purs.schemas import SpecificationItem
 from src.pipeline.schemas import ProcessingImageResponse
@@ -37,8 +37,8 @@ class ErrorMessages:
 
 class KeyboardLayouts:
     MAIN_MENU = ReplyKeyboardMarkup([
-        ["Day", "Month"],
-        ["Year", "Total"]
+        ["Statistics", "Uploads"],
+        ["Help", "Settings"]
     ], resize_keyboard=True)
 
     categories = [
@@ -51,6 +51,8 @@ class KeyboardLayouts:
         "🚀 Other",
         "🚫 Cancel"
     ]
+
+    categories_map = {_.split(" ", 1)[1]: _ for _ in categories}
 
     @staticmethod
     def get_category_keyboard(handle: str, for_item: str) -> List:
@@ -124,6 +126,48 @@ class MessageFormatter:
         items_section = MessageFormatter.format_top_items_section(title="items", items=items)
 
         return "\n".join([total_section, "", *companies_section, "", *items_section])
+
+    @staticmethod
+    def format_analytics_by_categories(data: ByCategoriesResponse, period: str, from_dt: str | None) -> str:
+        total_s = f"<b>{int(data.total):,} RSD</b>"
+        period_map = {
+            "today": f"Costs {total_s} for today ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%-d %B %a') if from_dt else ''})",
+            "currentMonth": f"Costs {total_s} in the current month ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%B')  if from_dt else ''})",
+            "currentYear": f"Costs {total_s} in the current year ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%Y')  if from_dt else ''})",
+            "allTime": f"Costs {total_s} for all time"
+        }
+        header_section = period_map[period]
+        categories_section = []
+        for category in data.categories:
+            s = f"<b>{int(category.total):,} ({int(1e2*category.total/data.total)}%)</b> — {KeyboardLayouts.categories_map.get(category.category, '')}"
+            categories_section.append(s)
+
+        return "\n".join([header_section, "", *categories_section])
+
+    @staticmethod
+    def format_analytics_by_bills(data: GetAnalyticsResponse, period: str, from_dt: str | None) -> str:
+        total_s = f"<b>{int(data.total):,} RSD</b>"
+        period_map = {
+            "today": f"Costs {total_s} for today ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%-d %B %a') if from_dt else ''})",
+            "currentMonth": f"Costs {total_s} in the current month ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%B')  if from_dt else ''})",
+            "currentYear": f"Costs {total_s} in the current year ({datetime.strptime(from_dt, '%Y-%m-%d').strftime('%Y')  if from_dt else ''})",
+            "allTime": f"Costs {total_s} for all time"
+        }
+        header_section = period_map[period]
+
+        companies = sorted(data.companies, key=lambda x: x.total, reverse=True)
+        companies_section = [f"🔥 <b>Top companies out of {len(companies)}</b>"]
+        for company in companies[:5]:
+            s = f"<b>{int(company.total):,} ({int(1e2*company.total/data.total)}%)</b> — {company.name}"
+            companies_section.append(s)
+
+        items = sorted(data.items, key=lambda x: x.total, reverse=True)
+        items_section = [f"🔥 <b>Top items out of {len(items)}</b>"]
+        for item in items[:5]:
+            s = f"<b>{int(item.total):,} ({int(1e2 * item.total / data.total)}%)</b> — {item.name}"
+            items_section.append(s)
+
+        return "\n".join([header_section, "", *companies_section, "", *items_section])
 
 
 # API Client
@@ -216,6 +260,16 @@ class APIClient:
             response.raise_for_status()
             return GetAnalyticsResponse.model_validate(response.json())
 
+    async def get_analytics_by_categories(self, username: str, from_dt: Optional[str] = None) -> ByCategoriesResponse:
+        params = {"user_name": username}
+        if from_dt is not None:
+            params["from_dt"] = from_dt
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(f"{self.base_url}/analytics/by-categories", params=params)
+            response.raise_for_status()
+            return ByCategoriesResponse.model_validate(response.json())
+
 
 # Handler class
 class TelegramHandler:
@@ -285,13 +339,128 @@ class TelegramHandler:
         except Exception as e:
             await update.message.reply_text(f"An error occurred: {str(e)}")
 
+    async def handle_message_statistics(self, update: Update, context: CallbackContext) -> None:
+        keyboard = [
+            [InlineKeyboardButton("By Categories", callback_data=f"statistics_byCategories")],
+            [InlineKeyboardButton("By Bills", callback_data=f"statistics_byBills")],
+            [InlineKeyboardButton("Cancel", callback_data=f"statistics_cancel")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        return await update.message.reply_text("Select an option", parse_mode="HTML", reply_markup=reply_markup)
+
+    async def handle_statistics_ByCategories(self, update: Update, context: CallbackContext):
+        """
+        query.data :
+            statistics_byCategories_today
+            statistics_byCategories_currentMonth
+        """
+        # query.from_user.username
+        query = update.callback_query
+        period = query.data.split("_")[-1]
+
+        datetime_now = datetime.now()
+        from_dt = None
+        if period == "today":
+            from_dt = datetime_now.strftime('%Y-%m-%d')
+        elif period == "currentMonth":
+            from_dt = datetime(year=datetime_now.year, month=datetime_now.month, day=1).strftime('%Y-%m-%d')
+        elif period == "currentYear":
+            from_dt = datetime(year=datetime_now.year, month=1, day=1).strftime('%Y-%m-%d')
+
+        by_categories_data = await self.api_client.get_analytics_by_categories(query.from_user.username, from_dt)
+
+        msg = MessageFormatter.format_analytics_by_categories(by_categories_data, period, from_dt)
+        return await query.message.edit_text(msg, parse_mode="HTML")
+
+    async def handle_statistics_ByBills(self, update: Update, context: CallbackContext):
+        """
+        query.data :
+            statistics_byCategories_today
+            statistics_byCategories_currentMonth
+        """
+        # query.from_user.username
+        query = update.callback_query
+        period = query.data.split("_")[-1]
+
+        datetime_now = datetime.now()
+        from_dt = None
+        if period == "today":
+            from_dt = datetime_now.strftime('%Y-%m-%d')
+        elif period == "currentMonth":
+            from_dt = datetime(year=datetime_now.year, month=datetime_now.month, day=1).strftime('%Y-%m-%d')
+        elif period == "currentYear":
+            from_dt = datetime(year=datetime_now.year, month=1, day=1).strftime('%Y-%m-%d')
+
+        data = await self.api_client.get_analytics(query.from_user.username, from_dt)
+        msg = MessageFormatter.format_analytics_by_bills(data, period, from_dt)
+        return await query.message.edit_text(msg, parse_mode="HTML")
+
+
+    async def handle_statistics(self, update: Update, context: CallbackContext):
+        """
+        query.data :
+            statistics_cancel
+            statistics_byCategories
+            statistics_byBills
+            statistics_byCategories_today
+            statistics_byCategories_currentMonth
+            statistics_byBills_previousMonth
+            statistics_byBills_currentYear
+            statistics_byBills_cancel
+        """
+        query = update.callback_query
+        _ = query.data.split("_")
+
+        if _[-1] == "cancel":
+            return await query.message.edit_text("Canceled", parse_mode="HTML")
+
+        if len(_) == 2:  # statistics_byCategories | statistics_byBills
+            handle = "_".join(_)
+            keyboard = [
+                [InlineKeyboardButton("Today", callback_data=f"{handle}_today")],
+                [InlineKeyboardButton("Current Month", callback_data=f"{handle}_currentMonth")],
+                # [InlineKeyboardButton("Previous Month", callback_data=f"{handle}_previousMonth")],
+                [InlineKeyboardButton("Current Year", callback_data=f"{handle}_currentYear")],
+                [InlineKeyboardButton("All time", callback_data=f"{handle}_allTime")],
+                [InlineKeyboardButton("Cancel", callback_data=f"{handle}_cancel")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            return await query.message.edit_text("Select a period", parse_mode="HTML", reply_markup=reply_markup)
+
+        handle, option, period = _
+        if option == "byCategories":
+            return await self.handle_statistics_ByCategories(update, context)
+        elif option == "byBills":
+            return await self.handle_statistics_ByBills(update, context)
+
+
+    async def handle_message_uploads(self, update: Update, context: CallbackContext) -> None:
+        # TODO
+        await update.message.reply_text("In development", parse_mode="HTML")
+
+    async def handle_message_help(self, update: Update, context: CallbackContext) -> None:
+        # TODO
+        await update.message.reply_text("In development", parse_mode="HTML")
+
+    async def handle_message_settings(self, update: Update, context: CallbackContext) -> None:
+        # TODO
+        await update.message.reply_text("In development", parse_mode="HTML")
+
+    async def handle_message_unknown(self, update: Update, context: CallbackContext) -> None:
+        return await update.message.reply_text("Unknown command")
 
     async def handle_message(self, update: Update, context: CallbackContext) -> None:
         text = update.message.text.lower()
-        if text in {"day", "month", "year", "total"}:
-            await self.handle_period_text(update, context)
-            return
 
+        handlers = {
+            "statistics": self.handle_message_statistics,
+            "uploads": self.handle_message_uploads,
+            "help": self.handle_message_help,
+            "settings": self.handle_message_settings,
+        }
+        handler_function = handlers.get(text)
+        if handler_function:
+            return await handler_function(update, context)
 
         username = update.message.from_user.username or "unknown"
         total, company, date = parse_line(text)
@@ -411,12 +580,13 @@ class TelegramHandler:
         action_handlers = {
             "changeCategory": self.handle_changeCategory,
             "setCategory": self.handle_setCategory,
-            "removeRecord": self.handle_removeRecord
+            "removeRecord": self.handle_removeRecord,
+            "statistics": self.handle_statistics,
         }
 
         query = update.callback_query
         await query.answer()
-        handler, _ = query.data.split("_", 1)
+        handler, *_ = query.data.split("_", 1)
         handler_function = action_handlers.get(handler)
         return await handler_function(update, context)
 

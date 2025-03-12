@@ -13,11 +13,14 @@ from src.bill.views import get_bills, get_bill
 from src.bill.schemas import GetBillResponse, SpecificationItem
 
 from src.cost.views import get_costs
+from src.cost.schemas import CostDocument
 
 from .schemas import (
     CompanyTotal,
     ItemTotal,
-    GetAnalyticsResponse
+    GetAnalyticsResponse,
+    ByCategory,
+    ByCategoriesResponse,
 )
 
 
@@ -62,9 +65,36 @@ async def get_bills_analytics(
     if bill_id is not None:
         bill = await get_bill(bill_id, db=db, request_id=request_id)
         bills = [bill]
-        costs = []
+        # costs = []
     else:
         bills = await get_bills(user_name, from_dt, db=db, request_id=request_id)
-        costs = await get_costs(user_name, from_dt, db=db, request_id=request_id)
+        # costs = await get_costs(user_name, from_dt, db=db, request_id=request_id)
 
-    return process_bills(bills+costs)
+    return process_bills(bills)
+
+
+def _process_items_by_categories(items: List[GetBillResponse | CostDocument]) -> ByCategoriesResponse:
+    total_by_categories = defaultdict(float)
+    total = 0.0
+    for item in items:
+        items_total = sum([_.total for _ in item.items])
+        total_by_categories[item.category] += items_total
+        total += items_total
+    categories = sorted(
+        [ByCategory(category=k, total=v) for k, v in total_by_categories.items()],
+        key=lambda x: x.total,
+        reverse=True
+    )
+    return ByCategoriesResponse(total=total, categories=categories)
+
+
+@router.get("/by-categories", response_model=ByCategoriesResponse)
+async def get_analytics_by_categories(
+    user_name: str = "unknown",
+    from_dt: datetime = None,
+    db: AsyncIOMotorDatabase=Depends(get_db),
+    request_id: str = Depends(get_request_id)
+):
+    bills = await get_bills(user_name, from_dt, db=db, request_id=request_id)
+    costs = await get_costs(user_name, from_dt, db=db, request_id=request_id)
+    return _process_items_by_categories(bills+costs)
