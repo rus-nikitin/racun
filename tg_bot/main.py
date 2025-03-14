@@ -49,7 +49,7 @@ class KeyboardLayouts:
         "🚗 Automobiles",
         "🌍 Travel & Tourism",
         "🚀 Other",
-        "💊 Drogerija"
+        "💊 Drogerija",
         "🚫 Cancel"
     ]
 
